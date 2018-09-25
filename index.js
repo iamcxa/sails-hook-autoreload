@@ -1,5 +1,7 @@
 var path = require('path');
+var fs = require('fs');
 var _ = require('@sailshq/lodash');
+
 module.exports = function(sails) {
 
   return {
@@ -56,7 +58,7 @@ module.exports = function(sails) {
 
       // If the hook has been deactivated, or controllers is deactivated just return
       if (!sails.config[this.configKey].active) {
-        sails.log.verbose("sails-hook-autoreload: Autoreload hook deactivated.");
+        sails.log.debug("sails-hook-autoreload: Autoreload hook deactivated.");
         return cb();
       }
 
@@ -72,14 +74,16 @@ module.exports = function(sails) {
         ignored: sails.config[this.configKey].ignored
       });
 
-      sails.log.verbose("sails-hook-autoreload: Autoreload watching: ", sails.config[this.configKey].dirs);
+      sails.log.debug("sails-hook-autoreload: Autoreload watching: ", sails.config[this.configKey].dirs);
 
       // Whenever something changes in those dirs, reload the ORM, controllers and blueprints.
       // Debounce the event handler so that it only fires after receiving all of the change
       // events.
       watcher.on('all', _.debounce(function(action, watchedPath, stats) {
 
-        sails.log.verbose("sails-hook-autoreload: Detected API change -- reloading controllers / models...");
+        sails.log.debug("sails-hook-autoreload: Detected API change -- reloading controllers / models...");
+
+        // console.log('sails.hooks=>', sails.hooks);
 
         // Don't use the configured migration strategy if `overrideMigrateSetting` is true.
 
@@ -94,6 +98,26 @@ module.exports = function(sails) {
           sails.hooks.helpers.reload(function() {
 
             function reloadEveryElseThanOrm () {
+                // FIXME:
+                // Reload User Hooks if any exists 
+                var userHookFolderPath = path.resolve(sails.config.appPath, 'api', 'hooks');
+                fs.exists(userHookFolderPath, function(isExists) {
+                  if (isExists) {
+                    fs.readdir(userHookFolderPath, function (err, dirs) {
+                      if (err) {
+                        return sails.log.warn('sails-hook-autoreload: Reload Error:', err);
+                      }
+                      dirs.forEach(function (dirName) {
+                        if (sails.hooks[dirName] && sails.hooks[dirName].load) {
+                          sails.hooks[dirName].load(() => {
+                            sails.log.debug(`Hook Reloaded: "${dirName}"`);
+                          });
+                        }
+                      });
+                    });
+                  }
+                });
+
                 // Reload services
                 if (sails.hooks.services) {
                   sails.hooks.services.loadModules(function() {});
@@ -112,13 +136,15 @@ module.exports = function(sails) {
                   delete require.cache[require.resolve(routesConfigPath)];
                   sails.config.routes = require(routesConfigPath).routes;
                 } catch (e) {
-                  sails.log.verbose('sails-hook-autoreload: Could not reload `' + routesConfigPath + '`.');
+                  sails.log.error('sails-hook-autoreload: Could not reload `' + routesConfigPath + '`.');
                 }
 
                 // Flush the router.
                 sails.config.routes = _.extend({}, sails.router.explicitRoutes, sails.config.routes);
                 sails.router.flush(sails.config.routes);
             }
+
+            console.log('sails.hooks=>', sails.hooks);
 
            if(sails.hooks.orm) {
              sails.hooks.orm.reload(function() {
